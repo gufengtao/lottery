@@ -1,0 +1,47 @@
+{
+  "name": "lottery",
+  "version": "1.0.0",
+  "description": "双色球生成器 - 生成符合规则的双色球号码，自动避免与历史 300 期重复",
+  "author": "Claude Code User",
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "lottery",
+      "description": "生成双色球号码",
+      "file": "commands/lottery.md"
+    },
+    {
+      "name": "lottery-update",
+      "description": "更新历史开奖数据",
+      "file": "commands/lottery-update.md"
+    }
+  ],
+  "skills": [
+    {
+      "name": "lottery-generator",
+      "description": "双色球号码生成核心逻辑",
+      "file": "skills/lottery-generator.mjs",
+      "exports": [
+        "generateLottery",
+        "rand",
+        "pad",
+        "getTail",
+        "hasConsecutive",
+        "getSameTailGroups",
+        "countRepeat",
+        "findConsecutivePairs",
+        "findSameTailGroups"
+      ]
+    }
+  ],
+  "data": {
+    "history": {
+      "path": "./data/lottery-history.json",
+      "description": "最近 300 期双色球开奖数据",
+      "source": "中国福彩网官方 (kaijiang.zhcw.com)"
+    }
+  },
+  "dependencies": {
+    "node": ">=14.0.0"
+  }
+}
