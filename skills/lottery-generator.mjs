@@ -2,9 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // ============== 配置 ==============
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -132,7 +129,9 @@ function buildHistoryCombos(history) {
  * 生成红球号码
  */
 function generateRedBalls(historyCombos, options) {
-  const { lastRed = [], repeat = 2, consecutive = 1, sameTail = 1 } = options;
+  const { lastRed = [], repeat, consecutive = 1, sameTail = 1 } = options;
+  // 默认重复上期红球数量：随机 0-2 个
+  const targetRepeat = repeat !== undefined ? repeat : rand(0, 2);
   const maxAttempts = 10000;
   let attempts = 0;
 
@@ -143,7 +142,7 @@ function generateRedBalls(historyCombos, options) {
     const lastRedNums = lastRed.map((r) => parseInt(r));
 
     // 先从上期号码中选择指定数量的重复球
-    const repeatedCount = Math.min(repeat, lastRed.length, 6);
+    const repeatedCount = Math.min(targetRepeat, lastRed.length, 6);
     const shuffledLast = lastRedNums.sort(() => Math.random() - 0.5);
     const selectedNums = new Set();
 
@@ -151,9 +150,11 @@ function generateRedBalls(historyCombos, options) {
       selectedNums.add(shuffledLast[i]);
     }
 
-    // 补充剩余号码
+    // 补充剩余号码（排除上期号码）
+    const nonLastNums = Array.from({ length: 33 }, (_, i) => i + 1)
+      .filter((n) => !lastRedNums.includes(n));
     while (selectedNums.size < 6) {
-      const num = rand(1, 33);
+      const num = nonLastNums[rand(0, nonLastNums.length - 1)];
       selectedNums.add(num);
     }
 
@@ -255,7 +256,7 @@ export function generateLottery(options = {}) {
 
   const redBalls = generateRedBalls(historyCombos, {
     lastRed,
-    repeat: options.repeat || 2,
+    repeat: options.repeat,
     consecutive: options.consecutive || 1,
     sameTail: options.sameTail || 1,
   });
