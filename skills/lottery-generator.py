@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+双色球生成器 - 生成符合规则的双色球号码
+自动避免与历史 300 期重复
+"""
+
+import json
+import random
+import sys
+import argparse
+from datetime import datetime
+from pathlib import Path
+
+# 设置标准输出为 UTF-8，避免 Windows 控制台编码问题
+sys.stdout.reconfigure(encoding='utf-8')
+
+# 获取脚本所在目录作为插件根目录
+SCRIPT_DIR = Path(__file__).parent
+HISTORY_PATH = SCRIPT_DIR.parent / 'data' / 'lottery-history.json'
+
+
+def load_history(limit=300):
+    """读取历史数据"""
+    try:
+        with open(HISTORY_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('history', [])[:limit]
+    except Exception as e:
+        print(f'❌ 无法读取历史数据：{e}')
+        return []
+
+
+def build_history_sets(history):
+    """生成历史号码集合（用于去重）"""
+    history_sets = set()
+    for draw in history:
+        red_tuple = tuple(sorted(draw['red_balls']))
+        history_sets.add((red_tuple, draw['blue_ball']))
+    return history_sets
+
+
+def pad(n):
+    """数字补零"""
+    return f"{n:02d}"
+
+
+def generate_number(last_red, last_blue, history_sets, options):
+    """
+    生成一注符合规则的双色球号码
+
+    Args:
+        last_red: 上期红球列表
+        last_blue: 上期蓝球
+        history_sets: 历史号码集合
+        options: 生成选项
+    """
+    max_attempts = 10000
+    repeat_count = options.get('repeat', random.randint(0, 2))
+    consecutive_groups = options.get('consecutive', 1)
+    same_tail_groups = options.get('same_tail', 1)
+
+    for _ in range(max_attempts):
+        red_balls = set()
+
+        # 1. 先从上期红球中选 repeat_count 个
+        if repeat_count > 0 and last_red:
+            selected_repeat = random.sample(list(last_red), min(repeat_count, len(last_red)))
+            red_balls.update(selected_repeat)
+
+        # 2. 生成剩余的红球
+        remaining = 6 - len(red_balls)
+
+        # 添加连续号码
+        if consecutive_groups >= 1 and remaining >= 2:
+            start = random.randint(1, 32)
+            consecutive_pair = [pad(start), pad(start + 1)]
+            if consecutive_pair[0] not in red_balls and consecutive_pair[1] not in red_balls:
+                red_balls.update(consecutive_pair)
+                remaining -= 2
+
+        # 添加同尾号
+        if same_tail_groups >= 1 and remaining >= 2:
+            tail = random.randint(0, 9)
+            same_tail = [pad(i) for i in range(1, 34)
+                        if i % 10 == tail and pad(i) not in red_balls]
+            if len(same_tail) >= 2:
+                selected_tail = random.sample(same_tail, 2)
+                red_balls.update(selected_tail)
+                remaining -= 2
+
+        # 补足剩余号码
+        while len(red_balls) < 6:
+            available = [pad(i) for i in range(1, 34) if pad(i) not in red_balls]
+            if available:
+                red_balls.add(random.choice(available))
+            else:
+                break
+
+        if len(red_balls) != 6:
+            continue
+
+        # 生成蓝球（尽量不跟上期重复）
+        blue_available = [pad(i) for i in range(1, 17) if pad(i) != last_blue]
+        blue_ball = random.choice(blue_available)
+
+        # 检查是否与历史 300 期重复
+        red_tuple = tuple(sorted(red_balls))
+        if (red_tuple, blue_ball) in history_sets:
+            continue
+
+        # 验证规则
+        red_list = sorted(red_balls, key=int)
+        repeat_reds = [r for r in red_list if r in last_red]
+
+        # 计算连续号码组数
+        consecutive_count = 0
+        for i in range(len(red_list) - 1):
+            if int(red_list[i + 1]) - int(red_list[i]) == 1:
+                consecutive_count += 1
+
+        # 计算同尾号
+        tail_dict = {}
+        for r in red_list:
+            tail = int(r) % 10
+            if tail not in tail_dict:
+                tail_dict[tail] = []
+            tail_dict[tail].append(r)
+        same_tail_pairs = [(tail, nums) for tail, nums in tail_dict.items()
+                          if len(nums) >= 2]
+
+        return {
+            'red_balls': red_list,
+            'blue_ball': blue_ball,
+            'repeat_reds': repeat_reds,
+            'consecutive_count': consecutive_count,
+            'same_tail_pairs': same_tail_pairs
+        }
+
+    return None
+
+
+def format_output(result, issue_num, index=None):
+    """格式化输出结果"""
+    output = []
+
+    if index is not None:
+        output.append(f"\n【第 {index} 注】")
+
+    output.append(f"红球：{'  '.join(result['red_balls'])}")
+    output.append(f"蓝球：{result['blue_ball']}")
+    output.append("规则验证:")
+
+    repeat_str = ', '.join(result['repeat_reds']) if result['repeat_reds'] else '无'
+    output.append(f"  ✅ 重复上期：{repeat_str}")
+
+    output.append(f"  ✅ 连续号码：{result['consecutive_count']} 组")
+
+    if result['same_tail_pairs']:
+        for tail, nums in result['same_tail_pairs']:
+            output.append(f"  ✅ 同尾号：{', '.join(nums)} (尾数 {tail})")
+    else:
+        output.append("  ✅ 同尾号：无")
+
+    return '\n'.join(output)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='双色球生成器')
+    parser.add_argument('--last-red', type=str, help='上期红球号码（逗号分隔）')
+    parser.add_argument('--last-blue', type=str, help='上期蓝球号码')
+    parser.add_argument('--repeat', type=int, help='重复上期红球数量')
+    parser.add_argument('--consecutive', type=int, default=1, help='连续号码组数')
+    parser.add_argument('--same-tail', type=int, default=1, help='同尾号组数')
+    parser.add_argument('--count', type=int, default=1, help='生成注数')
+
+    args = parser.parse_args()
+
+    # 读取历史数据
+    history = load_history(300)
+    if not history:
+        print('❌ 没有历史数据，请先运行 /lottery-update 更新数据')
+        sys.exit(1)
+
+    # 获取上期号码
+    latest = history[0]
+    last_red = set(latest['red_balls'])
+    last_blue = latest['blue_ball']
+
+    # 如果用户指定了上期号码，使用用户的
+    if args.last_red:
+        last_red = set(args.last_red.split(','))
+    if args.last_blue:
+        last_blue = args.last_blue
+
+    print(f"参考上期（{latest['issue']}期 {latest['date']}）: "
+          f"红球 {' '.join(latest['red_balls'])} 蓝球 {last_blue}")
+    print()
+
+    # 构建历史号码集合
+    history_sets = build_history_sets(history)
+
+    # 生成选项
+    options = {
+        'repeat': args.repeat if args.repeat is not None else random.randint(0, 2),
+        'consecutive': args.consecutive,
+        'same_tail': args.same_tail
+    }
+
+    next_issue = int(latest['issue']) + 1
+
+    # 生成单注还是多注
+    if args.count == 1:
+        result = generate_number(last_red, last_blue, history_sets, options)
+        if result:
+            print(format_output(result, next_issue))
+        else:
+            print('❌ 无法生成符合条件的号码，请调整规则参数')
+            sys.exit(1)
+    else:
+        # 生成多注
+        print("=" * 50)
+        print(f"双色球推荐号码（第 {next_issue} 期）")
+        print("=" * 50)
+
+        for i in range(args.count):
+            result = generate_number(last_red, last_blue, history_sets, options)
+            if result:
+                print(format_output(result, next_issue, i + 1))
+
+        print("\n" + "=" * 50)
+        print(f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("=" * 50)
+
+
+if __name__ == '__main__':
+    main()

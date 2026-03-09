@@ -88,5 +88,5 @@ allowed-tools:
 ## 实现代码
 
 ```bash
-node ~/.claude/plugins/lottery/skills/lottery-generator.mjs $ARGUMENTS
+python <plugin_dir>/skills/lottery-generator.py $ARGUMENTS
 ```
