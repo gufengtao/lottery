@@ -20,18 +20,7 @@
     {
       "name": "lottery-generator",
       "description": "双色球号码生成核心逻辑",
-      "file": "skills/lottery-generator.mjs",
-      "exports": [
-        "generateLottery",
-        "rand",
-        "pad",
-        "getTail",
-        "hasConsecutive",
-        "getSameTailGroups",
-        "countRepeat",
-        "findConsecutivePairs",
-        "findSameTailGroups"
-      ]
+      "file": "skills/lottery-generator.py"
     }
   ],
   "data": {
