@@ -45,7 +45,7 @@ def pad(n):
     return f"{n:02d}"
 
 
-def generate_number(last_red, last_blue, history_sets, options):
+def generate_number(last_red, last_blue, history_sets, options, recent_20=None):
     """
     生成一注符合规则的双色球号码
 
@@ -54,11 +54,14 @@ def generate_number(last_red, last_blue, history_sets, options):
         last_blue: 上期蓝球
         history_sets: 历史号码集合
         options: 生成选项
+        recent_20: 前 20 期红球集合（用于热度规则）
     """
     max_attempts = 10000
     repeat_count = options.get('repeat', random.randint(0, 2))
-    consecutive_groups = options.get('consecutive', 1)
-    same_tail_groups = options.get('same_tail', 1)
+    # 连号：1-2 组随机（约 60-70% 概率开出连号）
+    consecutive_groups = options.get('consecutive', random.choice([0, 1, 1, 2]))
+    # 同尾号：约 50% 概率出现，非强制
+    same_tail_groups = options.get('same_tail', random.choice([0, 0, 1, 1]))
 
     for _ in range(max_attempts):
         red_balls = set()
@@ -89,20 +92,45 @@ def generate_number(last_red, last_blue, history_sets, options):
                 red_balls.update(selected_tail)
                 remaining -= 2
 
-        # 补足剩余号码
+        # 补足剩余号码（优先选择前 20 期出现过的热号）
         while len(red_balls) < 6:
             available = [pad(i) for i in range(1, 34) if pad(i) not in red_balls]
-            if available:
-                red_balls.add(random.choice(available))
-            else:
+            if not available:
                 break
+            # 如果有 recent_20 数据，优先选择热号
+            if recent_20:
+                hot_numbers = [n for n in available if n in recent_20]
+                if hot_numbers and random.random() < 0.8:  # 80% 概率选热号
+                    red_balls.add(random.choice(hot_numbers))
+                else:
+                    red_balls.add(random.choice(available))
+            else:
+                red_balls.add(random.choice(available))
 
         if len(red_balls) != 6:
             continue
 
-        # 生成蓝球（尽量不跟上期重复）
+        # 生成蓝球（考虑大小/奇偶交替规律）
         blue_available = [pad(i) for i in range(1, 17) if pad(i) != last_blue]
-        blue_ball = random.choice(blue_available)
+
+        # 分析上期蓝球特征
+        last_blue_num = int(last_blue)
+        last_is_small = last_blue_num <= 8
+        last_is_odd = last_blue_num % 2 == 1
+
+        # 根据交替规律选择蓝球（约 60% 概率选择相反特征）
+        if random.random() < 0.6:
+            # 选择与上期相反的特征
+            if last_is_small:  # 上期小，这期选大
+                blue_available = [b for b in blue_available if int(b) > 8]
+            else:  # 上期大，这期选小
+                blue_available = [b for b in blue_available if int(b) <= 8]
+            if last_is_odd:  # 上期奇，这期选偶
+                blue_available = [b for b in blue_available if int(b) % 2 == 0]
+            else:  # 上期偶，这期选奇
+                blue_available = [b for b in blue_available if int(b) % 2 == 1]
+
+        blue_ball = random.choice(blue_available) if blue_available else random.choice([pad(i) for i in range(1, 17) if pad(i) != last_blue])
 
         # 检查是否与历史 300 期重复
         red_tuple = tuple(sorted(red_balls))
@@ -187,6 +215,11 @@ def main():
     last_red = set(latest['red_balls'])
     last_blue = latest['blue_ball']
 
+    # 提取前 20 期红球（用于热度规则）
+    recent_20_reds = set()
+    for draw in history[1:21]:  # 排除最新一期，取后面 20 期
+        recent_20_reds.update(draw['red_balls'])
+
     # 如果用户指定了上期号码，使用用户的
     if args.last_red:
         last_red = set(args.last_red.split(','))
@@ -211,7 +244,7 @@ def main():
 
     # 生成单注还是多注
     if args.count == 1:
-        result = generate_number(last_red, last_blue, history_sets, options)
+        result = generate_number(last_red, last_blue, history_sets, options, recent_20_reds)
         if result:
             print(format_output(result, next_issue))
         else:
@@ -224,7 +257,7 @@ def main():
         print("=" * 50)
 
         for i in range(args.count):
-            result = generate_number(last_red, last_blue, history_sets, options)
+            result = generate_number(last_red, last_blue, history_sets, options, recent_20_reds)
             if result:
                 print(format_output(result, next_issue, i + 1))
 
