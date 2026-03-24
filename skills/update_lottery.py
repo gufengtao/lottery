@@ -57,9 +57,9 @@ for page in range(1, 20):
 
 print(f'\n总计：{len(all_draws)}期')
 
-# 获取插件目录的 data 路径
+# 获取插件目录的 data 路径（保存到上级目录的 data/）
 script_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.join(script_dir, 'data')
+data_dir = os.path.join(script_dir, '..', 'data')
 os.makedirs(data_dir, exist_ok=True)
 
 new_draws = [{

@@ -45,7 +45,7 @@ def pad(n):
     return f"{n:02d}"
 
 
-def generate_number(last_red, last_blue, history_sets, options, recent_20=None):
+def generate_number(last_red, last_blue, history_sets, options, recent_20=None, history=None):
     """
     生成一注符合规则的双色球号码
 
@@ -55,6 +55,7 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None):
         history_sets: 历史号码集合
         options: 生成选项
         recent_20: 前 20 期红球集合（用于热度规则）
+        history: 历史数据列表（用于蓝球遗漏和热度统计）
     """
     max_attempts = 10000
     repeat_count = options.get('repeat', random.randint(0, 2))
@@ -110,27 +111,72 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None):
         if len(red_balls) != 6:
             continue
 
-        # 生成蓝球（考虑大小/奇偶交替规律）
-        blue_available = [pad(i) for i in range(1, 17) if pad(i) != last_blue]
+        # 生成蓝球（考虑大小/奇偶交替 + 追热 + 遗漏回补）
+        blue_available = [pad(i) for i in range(1, 17)]
 
         # 分析上期蓝球特征
         last_blue_num = int(last_blue)
         last_is_small = last_blue_num <= 8
         last_is_odd = last_blue_num % 2 == 1
 
-        # 根据交替规律选择蓝球（约 60% 概率选择相反特征）
-        if random.random() < 0.6:
-            # 选择与上期相反的特征
-            if last_is_small:  # 上期小，这期选大
-                blue_available = [b for b in blue_available if int(b) > 8]
-            else:  # 上期大，这期选小
-                blue_available = [b for b in blue_available if int(b) <= 8]
-            if last_is_odd:  # 上期奇，这期选偶
-                blue_available = [b for b in blue_available if int(b) % 2 == 0]
-            else:  # 上期偶，这期选奇
-                blue_available = [b for b in blue_available if int(b) % 2 == 1]
+        # 计算蓝球遗漏（多少期没开出）
+        blue_omission = {}
+        for b in range(1, 17):
+            bb = pad(b)
+            omission = 0
+            for draw in history:
+                if draw['blue_ball'] == bb:
+                    break
+                omission += 1
+            blue_omission[bb] = omission
 
-        blue_ball = random.choice(blue_available) if blue_available else random.choice([pad(i) for i in range(1, 17) if pad(i) != last_blue])
+        # 统计前 30 期蓝球热度
+        blue_heat = {}
+        for b in range(1, 17):
+            bb = pad(b)
+            blue_heat[bb] = sum(1 for draw in history[:30] if draw['blue_ball'] == bb)
+
+        # 蓝球选择策略（更均衡的概率分布）
+        strategy = random.random()
+
+        if strategy < 0.35:
+            # 35% 概率：交替模式（大小/奇偶相反）
+            if last_is_small:
+                blue_available = [b for b in blue_available if int(b) > 8]
+            else:
+                blue_available = [b for b in blue_available if int(b) <= 8]
+            if last_is_odd:
+                blue_available = [b for b in blue_available if int(b) % 2 == 0]
+            else:
+                blue_available = [b for b in blue_available if int(b) % 2 == 1]
+        elif strategy < 0.55:
+            # 20% 概率：追热模式（选择近期热号）
+            hot_blues = [b for b, heat in blue_heat.items() if heat >= 2]
+            if hot_blues:
+                blue_available = hot_blues
+        elif strategy < 0.75:
+            # 20% 概率：遗漏回补（选择遗漏 10 期以上的冷号）
+            cold_blues = [b for b, omis in blue_omission.items() if omis >= 10]
+            if cold_blues:
+                blue_available = cold_blues
+            else:
+                blue_available = [b for b in blue_available if b != last_blue]
+        else:
+            # 25% 概率：追趋势（与上期同大小或同奇偶）
+            if random.random() < 0.5:
+                # 同大小
+                if last_is_small:
+                    blue_available = [b for b in blue_available if int(b) <= 8]
+                else:
+                    blue_available = [b for b in blue_available if int(b) > 8]
+            else:
+                # 同奇偶
+                if last_is_odd:
+                    blue_available = [b for b in blue_available if int(b) % 2 == 1]
+                else:
+                    blue_available = [b for b in blue_available if int(b) % 2 == 0]
+
+        blue_ball = random.choice(blue_available) if blue_available else pad(random.randint(1, 16))
 
         # 检查是否与历史 300 期重复
         red_tuple = tuple(sorted(red_balls))
@@ -244,7 +290,7 @@ def main():
 
     # 生成单注还是多注
     if args.count == 1:
-        result = generate_number(last_red, last_blue, history_sets, options, recent_20_reds)
+        result = generate_number(last_red, last_blue, history_sets, options, recent_20_reds, history)
         if result:
             print(format_output(result, next_issue))
         else:
@@ -257,7 +303,7 @@ def main():
         print("=" * 50)
 
         for i in range(args.count):
-            result = generate_number(last_red, last_blue, history_sets, options, recent_20_reds)
+            result = generate_number(last_red, last_blue, history_sets, options, recent_20_reds, history)
             if result:
                 print(format_output(result, next_issue, i + 1))
 
