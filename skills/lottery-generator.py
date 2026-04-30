@@ -58,11 +58,14 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None, 
         history: 历史数据列表（用于蓝球遗漏和热度统计）
     """
     max_attempts = 10000
-    repeat_count = options.get('repeat', random.randint(0, 2))
-    # 连号：1-2 组随机（约 60-70% 概率开出连号）
-    consecutive_groups = options.get('consecutive', random.choice([0, 1, 1, 2]))
-    # 同尾号：约 50% 概率出现，非强制
-    same_tail_groups = options.get('same_tail', random.choice([0, 0, 1, 1]))
+    # 重号：0个~23%，1个~48%，2个~24%，3个~5%（基于历史统计）
+    repeat_count = options.get('repeat', random.choices([0, 1, 2, 3], weights=[23, 48, 24, 5])[0])
+    # 连号：0组~30%，1组~68%，2组~2%
+    consecutive_groups = options.get('consecutive', random.choices([0, 1, 2], weights=[30, 68, 2])[0])
+    # 同尾号：0组~26%，1组~52%，2组~22%（基于历史统计）
+    same_tail_groups = options.get('same_tail', random.choices([0, 1, 2], weights=[26, 52, 22])[0])
+    # 隔一号（差值=2）：0组~43%，1组~44%，2组~13%（基于历史统计）
+    skip_one_groups = options.get('skip_one', random.choices([0, 1, 2], weights=[43, 44, 13])[0])
 
     for _ in range(max_attempts):
         red_balls = set()
@@ -83,25 +86,47 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None, 
                 red_balls.update(consecutive_pair)
                 remaining -= 2
 
-        # 添加同尾号
-        if same_tail_groups >= 1 and remaining >= 2:
-            tail = random.randint(0, 9)
-            same_tail = [pad(i) for i in range(1, 34)
-                        if i % 10 == tail and pad(i) not in red_balls]
-            if len(same_tail) >= 2:
-                selected_tail = random.sample(same_tail, 2)
-                red_balls.update(selected_tail)
+        # 添加隔一号（差值=2）
+        for _ in range(skip_one_groups):
+            if remaining < 2:
+                break
+            start = random.randint(1, 31)
+            skip_pair = [pad(start), pad(start + 2)]
+            if skip_pair[0] not in red_balls and skip_pair[1] not in red_balls:
+                red_balls.update(skip_pair)
                 remaining -= 2
 
-        # 补足剩余号码（优先选择前 20 期出现过的热号）
+        # 添加同尾号
+        added_tail_groups = 0
+        used_tails = set()
+        for _ in range(same_tail_groups):
+            if remaining < 2:
+                break
+            available_tails = [t for t in range(0, 10) if t not in used_tails]
+            random.shuffle(available_tails)
+            for tail in available_tails:
+                same_tail = [pad(i) for i in range(1, 34)
+                             if i % 10 == tail and pad(i) not in red_balls]
+                if len(same_tail) >= 2:
+                    selected_tail = random.sample(same_tail, 2)
+                    red_balls.update(selected_tail)
+                    remaining -= 2
+                    used_tails.add(tail)
+                    added_tail_groups += 1
+                    break
+
+        # 补足剩余号码（优先选择前 20 期出现过的热号，且不超出重号预算）
         while len(red_balls) < 6:
+            current_repeats = sum(1 for n in red_balls if n in last_red)
             available = [pad(i) for i in range(1, 34) if pad(i) not in red_balls]
+            # 已达重号上限时，排除上期红球
+            if current_repeats >= repeat_count:
+                available = [n for n in available if n not in last_red]
             if not available:
                 break
-            # 如果有 recent_20 数据，优先选择热号
             if recent_20:
                 hot_numbers = [n for n in available if n in recent_20]
-                if hot_numbers and random.random() < 0.8:  # 80% 概率选热号
+                if hot_numbers and random.random() < 0.8:
                     red_balls.add(random.choice(hot_numbers))
                 else:
                     red_balls.add(random.choice(available))
@@ -178,6 +203,71 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None, 
 
         blue_ball = random.choice(blue_available) if blue_available else pad(random.randint(1, 16))
 
+        # 计算实际连续对组数（独立的连续段数）
+        red_sorted_check = sorted(red_balls, key=int)
+        actual_consecutive_groups = 0
+        i = 0
+        while i < len(red_sorted_check) - 1:
+            if int(red_sorted_check[i + 1]) - int(red_sorted_check[i]) == 1:
+                actual_consecutive_groups += 1
+                while i < len(red_sorted_check) - 1 and int(red_sorted_check[i + 1]) - int(red_sorted_check[i]) == 1:
+                    i += 1
+            i += 1
+        # 实际连续组数超出计划时，以 90% 概率重试
+        if actual_consecutive_groups > consecutive_groups and random.random() > 0.10:
+            continue
+
+        # 实际隔一号组数超出计划时，以 85% 概率重试
+        nums_sorted = sorted(int(n) for n in red_balls)
+        actual_skip_one_groups = sum(
+            1 for j in range(len(nums_sorted) - 1) if nums_sorted[j + 1] - nums_sorted[j] == 2
+        )
+        if actual_skip_one_groups > skip_one_groups and random.random() > 0.15:
+            continue
+
+        # 实际同尾组数超出计划时，以 85% 概率重试
+        actual_tail_dict = {}
+        for n in red_balls:
+            t = int(n) % 10
+            actual_tail_dict[t] = actual_tail_dict.get(t, 0) + 1
+        # 3个同尾概率仅 6%，以 94% 概率重试
+        if any(v >= 3 for v in actual_tail_dict.values()) and random.random() > 0.06:
+            continue
+        actual_same_tail_groups = sum(1 for v in actual_tail_dict.values() if v >= 2)
+        if actual_same_tail_groups > same_tail_groups and random.random() > 0.15:
+            continue
+
+        # 3+ 连续号码概率极低（约 5%），大概率跳过
+        red_sorted_check = sorted(red_balls, key=int)
+        max_consecutive = 1
+        cur_consecutive = 1
+        for i in range(1, len(red_sorted_check)):
+            if int(red_sorted_check[i]) - int(red_sorted_check[i - 1]) == 1:
+                cur_consecutive += 1
+                max_consecutive = max(max_consecutive, cur_consecutive)
+            else:
+                cur_consecutive = 1
+        if max_consecutive >= 3 and random.random() > 0.05:
+            continue
+
+        # 实际重号数超出计划时，以 85% 概率重试
+        actual_repeat_count = sum(1 for n in red_balls if n in last_red)
+        if actual_repeat_count > repeat_count and random.random() > 0.15:
+            continue
+
+        # 和值校验：<70 或 >=150 概率极低（各约 0.3%），95% 概率重试
+        red_sum = sum(int(n) for n in red_balls)
+        if (red_sum < 70 or red_sum >= 150) and random.random() > 0.05:
+            continue
+
+        # 奇偶/大小极端值（6:0 或 0:6）概率极低（各约 1%），90% 概率重试
+        odds = sum(1 for n in red_balls if int(n) % 2 == 1)
+        smalls = sum(1 for n in red_balls if int(n) <= 16)
+        if (odds == 0 or odds == 6) and random.random() > 0.10:
+            continue
+        if (smalls == 0 or smalls == 6) and random.random() > 0.10:
+            continue
+
         # 检查是否与历史 300 期重复
         red_tuple = tuple(sorted(red_balls))
         if (red_tuple, blue_ball) in history_sets:
@@ -203,12 +293,19 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None, 
         same_tail_pairs = [(tail, nums) for tail, nums in tail_dict.items()
                           if len(nums) >= 2]
 
+        # 计算隔一号对
+        skip_one_pairs = []
+        for j in range(len(red_list) - 1):
+            if int(red_list[j + 1]) - int(red_list[j]) == 2:
+                skip_one_pairs.append(f"{red_list[j]}-{red_list[j + 1]}")
+
         return {
             'red_balls': red_list,
             'blue_ball': blue_ball,
             'repeat_reds': repeat_reds,
             'consecutive_count': consecutive_count,
-            'same_tail_pairs': same_tail_pairs
+            'same_tail_pairs': same_tail_pairs,
+            'skip_one_pairs': skip_one_pairs
         }
 
     return None
@@ -236,6 +333,11 @@ def format_output(result, issue_num, index=None):
     else:
         output.append("  ✅ 同尾号：无")
 
+    if result['skip_one_pairs']:
+        output.append(f"  ✅ 隔一号：{', '.join(result['skip_one_pairs'])}")
+    else:
+        output.append("  ✅ 隔一号：无")
+
     return '\n'.join(output)
 
 
@@ -244,8 +346,9 @@ def main():
     parser.add_argument('--last-red', type=str, help='上期红球号码（逗号分隔）')
     parser.add_argument('--last-blue', type=str, help='上期蓝球号码')
     parser.add_argument('--repeat', type=int, help='重复上期红球数量')
-    parser.add_argument('--consecutive', type=int, default=1, help='连续号码组数')
-    parser.add_argument('--same-tail', type=int, default=1, help='同尾号组数')
+    parser.add_argument('--consecutive', type=int, default=None, help='连续号码组数')
+    parser.add_argument('--same-tail', type=int, default=None, help='同尾号组数')
+    parser.add_argument('--skip-one', type=int, default=None, help='隔一号组数（差值=2）')
     parser.add_argument('--count', type=int, default=1, help='生成注数')
 
     args = parser.parse_args()
@@ -281,10 +384,14 @@ def main():
 
     # 生成选项
     options = {
-        'repeat': args.repeat if args.repeat is not None else random.randint(0, 2),
-        'consecutive': args.consecutive,
-        'same_tail': args.same_tail
+        'repeat': args.repeat if args.repeat is not None else random.choices([0, 1, 2, 3], weights=[23, 48, 24, 5])[0],
     }
+    if args.consecutive is not None:
+        options['consecutive'] = args.consecutive
+    if args.same_tail is not None:
+        options['same_tail'] = args.same_tail
+    if args.skip_one is not None:
+        options['skip_one'] = args.skip_one
 
     next_issue = int(latest['issue']) + 1
 
