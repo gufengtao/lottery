@@ -60,8 +60,8 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None, 
     max_attempts = 10000
     # 重号：0个~23%，1个~48%，2个~24%，3个~5%（基于历史统计）
     repeat_count = options.get('repeat', random.choices([0, 1, 2, 3], weights=[23, 48, 24, 5])[0])
-    # 连号：0组~30%，1组~68%，2组~2%
-    consecutive_groups = options.get('consecutive', random.choices([0, 1, 2], weights=[30, 68, 2])[0])
+    # 连号：0组~36%，1组~56%，2组~8%（基于401期历史统计：无连36.4%/2连55.4%/3连+8.2%）
+    consecutive_groups = options.get('consecutive', random.choices([0, 1, 2], weights=[36, 56, 8])[0])
     # 同尾号：0组~26%，1组~52%，2组~22%（基于历史统计）
     same_tail_groups = options.get('same_tail', random.choices([0, 1, 2], weights=[26, 52, 22])[0])
     # 隔一号（差值=2）：0组~43%，1组~44%，2组~13%（基于历史统计）
@@ -237,7 +237,7 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None, 
         if actual_same_tail_groups > same_tail_groups and random.random() > 0.15:
             continue
 
-        # 3+ 连续号码概率极低（约 5%），大概率跳过
+        # 3+ 连续号码概率约 8.2%（401期统计），以 92% 概率重试
         red_sorted_check = sorted(red_balls, key=int)
         max_consecutive = 1
         cur_consecutive = 1
@@ -247,7 +247,7 @@ def generate_number(last_red, last_blue, history_sets, options, recent_20=None, 
                 max_consecutive = max(max_consecutive, cur_consecutive)
             else:
                 cur_consecutive = 1
-        if max_consecutive >= 3 and random.random() > 0.05:
+        if max_consecutive >= 3 and random.random() > 0.08:
             continue
 
         # 实际重号数超出计划时，以 85% 概率重试
